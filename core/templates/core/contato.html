@@ -16,16 +16,12 @@
                 <h2>Fale com a loja</h2>
                 <dl class="contato-lista">
                     <div>
-                        <dt>WhatsApp</dt>
-                        <dd>(11) 99999-5882</dd>
+                        <dt>Encomendas</dt>
+                        <dd>Abra o produto desejado no catálogo e use o botão Falar no WhatsApp.</dd>
                     </div>
                     <div>
                         <dt>Instagram</dt>
-                        <dd>@patchworkseafins</dd>
-                    </div>
-                    <div>
-                        <dt>E-mail</dt>
-                        <dd>Juliana.xxx@xxxxx.com</dd>
+                        <dd><a href="https://www.instagram.com/patchworkseafins/" target="_blank" rel="noopener noreferrer">@patchworkseafins</a></dd>
                     </div>
                     <div>
                         <dt>Prazo de resposta</dt>
@@ -37,9 +33,8 @@
             <aside class="contato-aside">
                 <h2>Onde enviamos</h2>
                 <p>
-                    Av. Dr. Timóteo Penteado, 1874<br>
-                    Vila Hulda — Guarulhos/SP<br>
-                    CEP 07094-000
+                    {{ loja.endereco }}<br>
+                    CEP {{ loja.cep_formatado }}
                 </p>
                 <p class="contato-note">
                     Produção sob encomenda. O frete pode ser calculado na página do produto.

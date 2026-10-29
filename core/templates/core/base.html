@@ -46,8 +46,10 @@
             </div>
         </div>
         <div class="footer-meta">
-            <p>Av. Dr. Timóteo Penteado, 1874 — Vila Hulda</p>
-            <p>Guarulhos/SP · CEP 07094-000</p>
+            {% if loja %}
+                <p>{{ loja.endereco }}</p>
+                <p>CEP {{ loja.cep_formatado }}</p>
+            {% endif %}
             <p>Resposta em até 48h úteis</p>
         </div>
     </div>

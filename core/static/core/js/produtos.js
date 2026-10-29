@@ -1,13 +1,22 @@
 let modalTrigger = null;
+const MODAL_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function modalAberto() {
+    return Array.from(document.querySelectorAll('.modal')).find(function (modal) {
+        return modal.style.display === 'flex';
+    });
+}
 
 function abrirModal(id, trigger) {
     const modal = document.getElementById(id);
     if (modal) {
         modalTrigger = trigger || document.activeElement;
+        modal.setAttribute('aria-hidden', 'false');
         modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
         const closeButton = modal.querySelector('.btn-fechar');
         if (closeButton) closeButton.focus();
+        else modal.focus();
     }
 }
 
@@ -15,6 +24,7 @@ function fecharModal(id) {
     const modal = document.getElementById(id);
     if (modal) {
         modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
         document.body.style.overflow = '';
         if (modalTrigger && modalTrigger.isConnected) modalTrigger.focus();
         modalTrigger = null;
@@ -23,18 +33,22 @@ function fecharModal(id) {
 
 function trocarImagem(produtoId, miniatura) {
     const imagemPrincipal = document.getElementById(`imagem-principal-${produtoId}`);
+    const imagemMiniatura = miniatura.querySelector('.galeria-img');
+    if (!imagemMiniatura) return;
+
     if (imagemPrincipal) {
-        imagemPrincipal.src = miniatura.src;
+        imagemPrincipal.src = imagemMiniatura.src;
     }
 
     const galeria = miniatura.parentElement;
-    const miniaturas = galeria.querySelectorAll('.galeria-img');
+    const miniaturas = galeria.querySelectorAll('.galeria-thumb');
 
     miniaturas.forEach(function (img) {
-        img.classList.remove('ativa');
+        const ativa = img === miniatura;
+        img.setAttribute('aria-pressed', ativa ? 'true' : 'false');
+        const imagem = img.querySelector('.galeria-img');
+        if (imagem) imagem.classList.toggle('ativa', ativa);
     });
-
-    miniatura.classList.add('ativa');
 }
 
 window.addEventListener('click', function (event) {
@@ -48,12 +62,34 @@ window.addEventListener('click', function (event) {
 });
 
 window.addEventListener('keydown', function (event) {
-    if (event.key !== 'Escape') return;
-    document.querySelectorAll('.modal').forEach(function (modal) {
-        if (modal.style.display === 'flex') {
-            fecharModal(modal.id);
-        }
+    const modal = modalAberto();
+    if (!modal) return;
+
+    if (event.key === 'Escape') {
+        fecharModal(modal.id);
+        return;
+    }
+
+    if (event.key !== 'Tab') return;
+    const focaveis = Array.from(modal.querySelectorAll(MODAL_FOCUSABLE)).filter(function (element) {
+        return !element.hidden && element.getClientRects().length > 0;
     });
+
+    if (!focaveis.length) {
+        event.preventDefault();
+        modal.focus();
+        return;
+    }
+
+    const primeiro = focaveis[0];
+    const ultimo = focaveis[focaveis.length - 1];
+    if (event.shiftKey && (document.activeElement === primeiro || !modal.contains(document.activeElement))) {
+        event.preventDefault();
+        ultimo.focus();
+    } else if (!event.shiftKey && (document.activeElement === ultimo || !modal.contains(document.activeElement))) {
+        event.preventDefault();
+        primeiro.focus();
+    }
 });
 
 function getCookie(name) {

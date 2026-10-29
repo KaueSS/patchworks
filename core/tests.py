@@ -1,4 +1,5 @@
-from django.test import SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.template.loader import render_to_string
 import json
 import tempfile
 from pathlib import Path
@@ -10,6 +11,7 @@ from django.test import override_settings
 
 from core.models import Produto
 from core.services.melhor_envio import calcular_frete_produtos, get_access_token
+from core.services.viacep import ViaCepError
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.signed_cookies')
 class MelhorEnvioCallbackTests(SimpleTestCase):
@@ -207,7 +209,13 @@ class FreightDemoModeTests(SimpleTestCase):
         )
         get_product.return_value = product
         get_store.return_value = SimpleNamespace(cep_digitos='07094000')
-        lookup_cep.return_value = {'cep': '01001-000'}
+        lookup_cep.return_value = {
+            'cep': '01001-000',
+            'logradouro': 'Praça da Sé',
+            'bairro': 'Sé',
+            'localidade': 'São Paulo',
+            'uf': 'SP',
+        }
         calculate_freight.return_value = []
 
         response = self.client.post(
@@ -222,5 +230,144 @@ class FreightDemoModeTests(SimpleTestCase):
         self.assertIs(body.get('simulado'), True)
         self.assertIn('SIMULAÇÃO', body.get('aviso', '').upper())
         self.assertTrue(body.get('opcoes'))
-        lookup_cep.assert_not_called()
+        self.assertEqual(body['endereco']['localidade'], 'São Paulo')
+        lookup_cep.assert_called_once_with('01001000')
         calculate_freight.assert_not_called()
+
+    @override_settings(MELHOR_ENVIO_SIMULATE_FREIGHT=True)
+    @patch('core.views.calcular_frete_produtos')
+    @patch('core.views.consultar_cep', side_effect=ViaCepError('ViaCEP indisponível.', 502))
+    @patch('core.views.ConfiguracaoLoja.get_solo')
+    @patch('core.views.get_object_or_404')
+    def test_demo_quote_survives_a_temporary_viacep_outage(
+        self, get_product, get_store, lookup_cep, calculate_freight
+    ):
+        product = SimpleNamespace(
+            id=1,
+            codigo='DEMO-1',
+            nome='Produto demonstrativo',
+            quantidade_minima=1,
+            preco_seguro=Decimal('35.00'),
+            dimensoes_unidade=lambda: {
+                'width': 10,
+                'height': 8,
+                'length': 12,
+                'weight': 0.25,
+            },
+        )
+        get_product.return_value = product
+        get_store.return_value = SimpleNamespace(cep_digitos='07094000')
+
+        response = self.client.post(
+            '/api/frete/cotar/',
+            data=json.dumps({'produto_id': 1, 'cep': '01001000', 'quantidade': 1}),
+            content_type='application/json',
+            secure=True,
+        )
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(body.get('simulado'), True)
+        self.assertIsNone(body.get('endereco'))
+        self.assertIn('ViaCEP', body.get('aviso', ''))
+        self.assertTrue(body.get('opcoes'))
+        calculate_freight.assert_not_called()
+
+    @override_settings(MELHOR_ENVIO_SIMULATE_FREIGHT=True)
+    @patch('core.views.consultar_cep', side_effect=ViaCepError('CEP não encontrado.', 404))
+    @patch('core.views.ConfiguracaoLoja.get_solo')
+    @patch('core.views.get_object_or_404')
+    def test_demo_quote_rejects_a_cep_not_found_by_viacep(
+        self, get_product, get_store, lookup_cep
+    ):
+        product = SimpleNamespace(
+            id=1,
+            codigo='DEMO-1',
+            nome='Produto demonstrativo',
+            quantidade_minima=1,
+            preco_seguro=Decimal('35.00'),
+            dimensoes_unidade=lambda: {
+                'width': 10,
+                'height': 8,
+                'length': 12,
+                'weight': 0.25,
+            },
+        )
+        get_product.return_value = product
+        get_store.return_value = SimpleNamespace(cep_digitos='07094000')
+
+        response = self.client.post(
+            '/api/frete/cotar/',
+            data=json.dumps({'produto_id': 1, 'cep': '99999999', 'quantidade': 1}),
+            content_type='application/json',
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json().get('ok'))
+
+
+class StoreContactPageTests(SimpleTestCase):
+    @patch('core.views.ConfiguracaoLoja.get_solo')
+    def test_contact_page_uses_configured_address_without_example_contacts(self, get_store):
+        get_store.return_value = SimpleNamespace(
+            endereco='Rua de demonstração, 10 — Guarulhos/SP',
+            cep_formatado='07000-000',
+        )
+
+        response = self.client.get('/contato/', secure=True, HTTP_HOST='127.0.0.1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Rua de demonstração, 10 — Guarulhos/SP')
+        self.assertContains(response, '07000-000')
+        self.assertNotContains(response, '99999-5882')
+        self.assertNotContains(response, 'Juliana.xxx@xxxxx.com')
+        self.assertContains(response, 'Instagram')
+
+
+class ProductAccessibilityMarkupTests(SimpleTestCase):
+    def render_product_page(self):
+        image = SimpleNamespace(url='/media/produto-principal.jpg')
+        additional_image = SimpleNamespace(imagem=SimpleNamespace(url='/media/produto-detalhe.jpg'))
+        product = SimpleNamespace(
+            id=1,
+            nome='Produto de demonstração',
+            imagem=image,
+            imagens=SimpleNamespace(all=lambda: [additional_image]),
+            tem_desconto=False,
+            preco=Decimal('25.00'),
+            quantidade_minima=1,
+            prazo_dias_uteis=5,
+            descricao='Descrição de demonstração.',
+            medidas='10 × 8 × 12 cm',
+            peso='250 g',
+            codigo='DEMO-1',
+            publicado_em=None,
+            whatsapp_numero='',
+        )
+        request = RequestFactory().get('/produtos/')
+        return render_to_string(
+            'core/produtos.html',
+            {
+                'produtos': [product],
+                'categorias': [],
+                'busca': '',
+                'categoria_id': '',
+                'loja': SimpleNamespace(endereco='Rua de demonstração', cep_formatado='07000-000'),
+            },
+            request=request,
+        )
+
+    def test_freight_status_uses_a_polite_live_region(self):
+        html = self.render_product_page()
+
+        self.assertIn('role="status"', html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn('aria-atomic="true"', html)
+
+    def test_gallery_thumbnails_are_keyboard_operable_buttons(self):
+        html = self.render_product_page()
+
+        self.assertIn('class="galeria-thumb"', html)
+        self.assertIn('aria-pressed="true"', html)
+        self.assertIn('aria-label="Ver imagem', html)

@@ -19,12 +19,15 @@ from .services.frete_simulado import simular_opcoes_frete
 
 
 def home(request):
-    return render(request, 'core/home.html')
+    return render(request, 'core/home.html', {'loja': ConfiguracaoLoja.get_solo()})
 
 
 def avaliacoes(request):
     avaliacoes = Avaliacao.objects.select_related('produto').order_by('-criado_em')
-    return render(request, 'core/avaliacoes.html', {'avaliacoes': avaliacoes})
+    return render(request, 'core/avaliacoes.html', {
+        'avaliacoes': avaliacoes,
+        'loja': ConfiguracaoLoja.get_solo(),
+    })
 
 
 @ensure_csrf_cookie
@@ -56,7 +59,7 @@ def produtos(request):
 
 
 def contato(request):
-    return render(request, 'core/contato.html')
+    return render(request, 'core/contato.html', {'loja': ConfiguracaoLoja.get_solo()})
 
 
 @require_GET
@@ -115,6 +118,17 @@ def api_cotar_frete(request):
     endereco = None
 
     if simulado:
+        aviso_cep = ''
+        try:
+            endereco = consultar_cep(cep_destino)
+        except ViaCepError as exc:
+            if exc.status_code != 502:
+                return JsonResponse(
+                    {'ok': False, 'error': exc.message},
+                    status=exc.status_code or 400,
+                )
+            aviso_cep = 'ViaCEP indisponível; o endereço não foi validado.'
+
         try:
             opcoes = simular_opcoes_frete(
                 cep_origem=loja.cep_digitos,
@@ -166,6 +180,7 @@ def api_cotar_frete(request):
         'simulado': simulado,
         'aviso': (
             'SIMULAÇÃO: preço e prazo ilustrativos; não são uma cotação do Melhor Envio.'
+            + (f' {aviso_cep}' if simulado and aviso_cep else '')
             if simulado else ''
         ),
         'endereco': endereco,

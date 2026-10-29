@@ -211,7 +211,24 @@
     overflow-y: auto;
 }
 
+.galeria-thumb {
+    flex: 0 0 auto;
+    width: 94px;
+    height: 94px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.galeria-thumb:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+}
+
 .galeria-img {
+    display: block;
     width: 90px;
     height: 90px;
     object-fit: cover;
@@ -221,7 +238,7 @@
     transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
 }
 
-.galeria-img:hover {
+.galeria-thumb:hover .galeria-img {
     transform: translateY(-2px);
     border-color: var(--bg-deep);
 }
@@ -525,5 +542,16 @@
     .modal-content {
         padding: 18px;
         width: 95%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .produto-card,
+    .galeria-img,
+    .reveal {
+        scroll-behavior: auto;
+        animation-duration: 0.01ms;
+        animation-iteration-count: 1;
+        transition-duration: 0.01ms;
     }
 }

@@ -88,25 +88,31 @@
     </div>
 
     {% for produto in produtos %}
-        <div id="modal{{ produto.id }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="titulo-modal-{{ produto.id }}">
+        <div id="modal{{ produto.id }}" class="modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="titulo-modal-{{ produto.id }}" tabindex="-1">
             <div class="modal-content">
                 <h3 class="modal-titulo" id="titulo-modal-{{ produto.id }}">{{ produto.nome }}</h3>
 
                 <div class="produto-topo-modal">
-                    <div class="galeria">
-                        <img
-                            src="{{ produto.imagem.url }}"
-                            alt="{{ produto.nome }}"
-                            class="galeria-img ativa"
+                    <div class="galeria" role="group" aria-label="Galeria de imagens de {{ produto.nome }}">
+                        <button
+                            type="button"
+                            class="galeria-thumb"
+                            aria-label="Ver imagem principal de {{ produto.nome }}"
+                            aria-pressed="true"
                             onclick="trocarImagem('{{ produto.id }}', this)"
                         >
+                            <img src="{{ produto.imagem.url }}" alt="" class="galeria-img ativa">
+                        </button>
                         {% for img in produto.imagens.all %}
-                            <img
-                                src="{{ img.imagem.url }}"
-                                alt="Imagem adicional de {{ produto.nome }}"
-                                class="galeria-img"
+                            <button
+                                type="button"
+                                class="galeria-thumb"
+                                aria-label="Ver imagem adicional {{ forloop.counter }} de {{ produto.nome }}"
+                                aria-pressed="false"
                                 onclick="trocarImagem('{{ produto.id }}', this)"
                             >
+                                <img src="{{ img.imagem.url }}" alt="" class="galeria-img">
+                            </button>
                         {% endfor %}
                     </div>
 
@@ -205,7 +211,7 @@
                     </div>
 
                     <p class="frete-endereco" data-frete-endereco hidden></p>
-                    <p class="frete-status" data-frete-status hidden></p>
+                    <p class="frete-status" data-frete-status role="status" aria-live="polite" aria-atomic="true" hidden></p>
                     <ul class="frete-opcoes" data-frete-opcoes></ul>
                 </div>
 
