@@ -16,6 +16,29 @@ def env_bool(name, default=False):
     value = os.getenv(name, str(default))
     return value.strip().lower() in ('1', 'true', 'yes', 'on')
 
+
+def build_mysql_options(environ):
+    options = {
+        'charset': 'utf8mb4',
+        'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+    }
+    require_tls = str(environ.get('MYSQL_REQUIRE_TLS', '')).strip().lower() in (
+        '1', 'true', 'yes', 'on'
+    )
+    if require_tls:
+        ca_bundle = str(environ.get('MYSQL_SSL_CA', '')).strip()
+        if not ca_bundle:
+            raise ImproperlyConfigured(
+                'MYSQL_SSL_CA is required when MYSQL_REQUIRE_TLS is enabled.'
+            )
+        options.update({
+            'ssl_ca': ca_bundle,
+            'ssl_verify_cert': True,
+            'ssl_verify_identity': True,
+        })
+    return options
+
+
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 if not SECRET_KEY:
     raise ImproperlyConfigured('Defina uma DJANGO_SECRET_KEY única no arquivo .env.')
@@ -100,10 +123,7 @@ DATABASES = {
         'PASSWORD': os.getenv('MYSQL_PASSWORD', ''),
         'HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
         'PORT': os.getenv('MYSQL_PORT', '3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
+        'OPTIONS': build_mysql_options(os.environ),
     }
 }
 

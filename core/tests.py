@@ -8,9 +8,11 @@ from unittest.mock import Mock, patch
 from decimal import Decimal
 
 from django.contrib import admin
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
 import core.models as core_models
+import patchworks.settings as project_settings
 from core.models import Produto
 from core.services.melhor_envio import (
     MelhorEnvioError,
@@ -19,6 +21,34 @@ from core.services.melhor_envio import (
     save_token_response,
 )
 from core.services.viacep import ViaCepError
+
+
+class MySQLDatabaseOptionsTests(SimpleTestCase):
+    def test_mysql_options_builder_is_available(self):
+        self.assertTrue(callable(getattr(project_settings, 'build_mysql_options', None)))
+
+    def test_local_mysql_options_stay_unchanged_without_tls_flag(self):
+        options = project_settings.build_mysql_options({})
+
+        self.assertEqual(options['charset'], 'utf8mb4')
+        self.assertEqual(options['init_command'], "SET sql_mode='STRICT_TRANS_TABLES'")
+        self.assertNotIn('ssl_ca', options)
+        self.assertNotIn('ssl_verify_cert', options)
+        self.assertNotIn('ssl_verify_identity', options)
+
+    def test_tidb_requires_a_ca_bundle(self):
+        with self.assertRaises(ImproperlyConfigured):
+            project_settings.build_mysql_options({'MYSQL_REQUIRE_TLS': 'true'})
+
+    def test_tidb_tls_verifies_certificate_and_hostname(self):
+        options = project_settings.build_mysql_options({
+            'MYSQL_REQUIRE_TLS': 'true',
+            'MYSQL_SSL_CA': '/etc/ssl/certs/ca-certificates.crt',
+        })
+
+        self.assertEqual(options['ssl_ca'], '/etc/ssl/certs/ca-certificates.crt')
+        self.assertIs(options['ssl_verify_cert'], True)
+        self.assertIs(options['ssl_verify_identity'], True)
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.signed_cookies')
 class MelhorEnvioCallbackTests(SimpleTestCase):
