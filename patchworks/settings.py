@@ -4,18 +4,23 @@ Django settings for patchworks project.
 
 from pathlib import Path
 import os
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-lij(r(q-dw(x7b+5xn7$o9bau9myl$ue33)(sqvg&#2x(x*hno)',
-)
 
-DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes')
+def env_bool(name, default=False):
+    value = os.getenv(name, str(default))
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('Defina uma DJANGO_SECRET_KEY única no arquivo .env.')
+
+DEBUG = env_bool('DJANGO_DEBUG', False)
 
 ALLOWED_HOSTS = [
     h.strip()
@@ -28,6 +33,24 @@ CSRF_TRUSTED_ORIGINS = [
     for o in os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
     if o.strip()
 ]
+
+# Para HTTPS atrás de um proxy confiável, como o Cloudflare Tunnel.
+if env_bool('DJANGO_TRUST_PROXY_SSL_HEADER', False):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+SECURE_SSL_REDIRECT = env_bool('DJANGO_SECURE_SSL_REDIRECT', not DEBUG)
+SESSION_COOKIE_SECURE = env_bool('DJANGO_SESSION_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SECURE = env_bool('DJANGO_CSRF_COOKIE_SECURE', not DEBUG)
+SECURE_HSTS_SECONDS = int(
+    os.getenv('DJANGO_SECURE_HSTS_SECONDS', '3600' if not DEBUG else '0')
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', False)
+SECURE_HSTS_PRELOAD = env_bool('DJANGO_SECURE_HSTS_PRELOAD', False)
+SECURE_REFERRER_POLICY = os.getenv(
+    'DJANGO_SECURE_REFERRER_POLICY', 'strict-origin-when-cross-origin'
+)
+SERVE_MEDIA_FILES = env_bool('DJANGO_SERVE_MEDIA_FILES', False)
+MELHOR_ENVIO_SIMULATE_FREIGHT = env_bool('MELHOR_ENVIO_SIMULATE_FREIGHT', False)
 
 INSTALLED_APPS = [
     'core',

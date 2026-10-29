@@ -1,8 +1,13 @@
-function abrirModal(id) {
+let modalTrigger = null;
+
+function abrirModal(id, trigger) {
     const modal = document.getElementById(id);
     if (modal) {
+        modalTrigger = trigger || document.activeElement;
         modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
+        const closeButton = modal.querySelector('.btn-fechar');
+        if (closeButton) closeButton.focus();
     }
 }
 
@@ -11,6 +16,8 @@ function fecharModal(id) {
     if (modal) {
         modal.style.display = 'none';
         document.body.style.overflow = '';
+        if (modalTrigger && modalTrigger.isConnected) modalTrigger.focus();
+        modalTrigger = null;
     }
 }
 
@@ -35,8 +42,7 @@ window.addEventListener('click', function (event) {
 
     modais.forEach(function (modal) {
         if (event.target === modal) {
-            modal.style.display = 'none';
-            document.body.style.overflow = '';
+            fecharModal(modal.id);
         }
     });
 });
@@ -45,8 +51,7 @@ window.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
     document.querySelectorAll('.modal').forEach(function (modal) {
         if (modal.style.display === 'flex') {
-            modal.style.display = 'none';
-            document.body.style.overflow = '';
+            fecharModal(modal.id);
         }
     });
 });
@@ -83,7 +88,7 @@ function setFreteStatus(box, message, type) {
     if (!status) return;
     status.hidden = !message;
     status.textContent = message || '';
-    status.classList.remove('is-error', 'is-loading', 'is-ok');
+    status.classList.remove('is-error', 'is-loading', 'is-ok', 'is-simulated');
     if (type) status.classList.add(type);
 }
 
@@ -170,17 +175,31 @@ async function cotarFrete(box) {
                 ? `${opcao.delivery_time} dia(s) útil(eis)`
                 : 'Prazo sob consulta';
 
-            li.innerHTML = `
-                <div class="frete-opcao-main">
-                    <strong>${opcao.company || 'Transportadora'} — ${opcao.name || 'Serviço'}</strong>
-                    <span>${prazo}</span>
-                </div>
-                <div class="frete-opcao-preco">${formatMoney(opcao.price, opcao.currency)}</div>
-            `;
+            const main = document.createElement('div');
+            main.className = 'frete-opcao-main';
+
+            const name = document.createElement('strong');
+            name.textContent = `${opcao.company || 'Transportadora'} — ${opcao.name || 'Serviço'}`;
+
+            const delivery = document.createElement('span');
+            delivery.textContent = prazo;
+
+            const price = document.createElement('div');
+            price.className = 'frete-opcao-preco';
+            price.textContent = formatMoney(opcao.price, opcao.currency);
+
+            main.append(name, delivery);
+            li.append(main, price);
             lista.appendChild(li);
         });
 
-        setFreteStatus(box, `${data.opcoes.length} opção(ões) encontrada(s).`, 'is-ok');
+        setFreteStatus(
+            box,
+            data.simulado
+                ? data.aviso
+                : `${data.opcoes.length} opção(ões) encontrada(s).`,
+            data.simulado ? 'is-simulated' : 'is-ok'
+        );
         if (data.produto && data.produto.peso_total_kg != null) {
             const d = data.produto.dimensoes_unidade || {};
             const extra = document.createElement('p');
@@ -199,6 +218,18 @@ async function cotarFrete(box) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.produto-card[data-modal-id]').forEach(function (card) {
+        card.addEventListener('click', function () {
+            abrirModal(card.dataset.modalId, card);
+        });
+        card.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                abrirModal(card.dataset.modalId, card);
+            }
+        });
+    });
+
     document.querySelectorAll('[data-frete-box]').forEach(function (box) {
         const cepInput = box.querySelector('[data-frete-cep]');
         const btn = box.querySelector('[data-frete-btn]');

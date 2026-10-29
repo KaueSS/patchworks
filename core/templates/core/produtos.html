@@ -1,5 +1,5 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load static l10n %}
 
 {% block title %}Produtos — Patch Works e Afins{% endblock %}
 
@@ -40,7 +40,7 @@
 
         <div class="produtos-container">
             {% for produto in produtos %}
-                <article class="produto-card reveal" onclick="abrirModal('modal{{ produto.id }}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')abrirModal('modal{{ produto.id }}')">
+                <article class="produto-card reveal" data-modal-id="modal{{ produto.id }}" role="button" tabindex="0" aria-haspopup="dialog">
                     <div class="produto-card-imagem-wrap">
                         {% if produto.tem_desconto and produto.preco_desconto %}
                             <span class="badge-desconto-pix">Desconto PIX</span>
@@ -55,16 +55,16 @@
                             <div class="produto-preco-bloco">
                                 <div class="linha-desconto-topo">
                                     <span class="desconto-badge">{{ produto.porcentagem_desconto }}% off</span>
-                                    <span class="preco-antigo-topo">R$ {{ produto.preco }}</span>
+                                    <span class="preco-antigo-topo">R$ {{ produto.preco|localize }}</span>
                                 </div>
                                 <div class="preco-novo-destaque">
-                                    R$ {{ produto.preco_desconto }} <span class="pix-label">no pix</span>
+                                    R$ {{ produto.preco_desconto|localize }} <span class="pix-label">no pix</span>
                                 </div>
-                                <div class="preco-secundario">R$ {{ produto.preco }} no cartão</div>
+                                <div class="preco-secundario">R$ {{ produto.preco|localize }} no cartão</div>
                             </div>
                         {% else %}
                             <div class="produto-preco-bloco">
-                                <div class="preco-novo-destaque">R$ {{ produto.preco }}</div>
+                                <div class="preco-novo-destaque">R$ {{ produto.preco|localize }}</div>
                             </div>
                         {% endif %}
 
@@ -124,14 +124,14 @@
                     {% if produto.tem_desconto and produto.preco_desconto %}
                         <div class="linha-desconto-topo">
                             <span class="desconto-badge">{{ produto.porcentagem_desconto }}% off</span>
-                            <span class="preco-antigo-topo">R$ {{ produto.preco }}</span>
+                            <span class="preco-antigo-topo">R$ {{ produto.preco|localize }}</span>
                         </div>
                         <div class="preco-novo-modal">
-                            R$ {{ produto.preco_desconto }} <span class="pix-label">no pix</span>
+                            R$ {{ produto.preco_desconto|localize }} <span class="pix-label">no pix</span>
                         </div>
-                        <div class="preco-secundario">R$ {{ produto.preco }} no cartão de crédito</div>
+                        <div class="preco-secundario">R$ {{ produto.preco|localize }} no cartão de crédito</div>
                     {% else %}
-                        <div class="preco-normal-modal">R$ {{ produto.preco }}</div>
+                        <div class="preco-normal-modal">R$ {{ produto.preco|localize }}</div>
                     {% endif %}
                 </div>
 

@@ -389,6 +389,14 @@
     color: var(--accent);
 }
 
+.frete-status.is-simulated {
+    padding: 8px 10px;
+    border-left: 3px solid var(--copper);
+    border-radius: 4px;
+    background: rgba(184, 92, 56, 0.1);
+    color: var(--ink);
+}
+
 .frete-status.is-error {
     color: var(--copper);
 }

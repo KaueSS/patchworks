@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models  # importa o módulo de modelos do Django (ORM)
+from django.core.exceptions import ValidationError
 from urllib.parse import quote
 # Transforma a mensagem em formato válido para URL do zap
 import re
@@ -178,6 +179,35 @@ class Produto(models.Model):
         return self.nome
         # mostra o nome do produto
 
+    def clean(self):
+        """Evita salvar no Admin preços e medidas que quebram as cotações."""
+        super().clean()
+        errors = {}
+
+        if self.tem_desconto:
+            if self.preco_desconto is None:
+                errors['preco_desconto'] = 'Informe o preço promocional.'
+            elif self.preco is not None and self.preco_desconto >= self.preco:
+                errors['preco_desconto'] = 'O preço promocional deve ser menor que o preço normal.'
+
+        campos_frete = ('altura_cm', 'largura_cm', 'comprimento_cm', 'peso_kg')
+        valores_frete = [getattr(self, campo) for campo in campos_frete]
+        if any(valor is not None for valor in valores_frete):
+            nomes = {
+                'altura_cm': 'Altura',
+                'largura_cm': 'Largura',
+                'comprimento_cm': 'Comprimento',
+                'peso_kg': 'Peso',
+            }
+            for campo, valor in zip(campos_frete, valores_frete):
+                if valor is None:
+                    errors[campo] = f'Informe {nomes[campo].lower()} para cotar o frete.'
+                elif valor <= 0:
+                    errors[campo] = f'{nomes[campo]} deve ser maior que zero.'
+
+        if errors:
+            raise ValidationError(errors)
+
     @property
     def whatsapp_link(self):
         if not self.whatsapp_numero:
@@ -189,7 +219,12 @@ class Produto(models.Model):
 
     @property
     def porcentagem_desconto(self):
-        if self.tem_desconto and self.preco_desconto:
+        if (
+            self.tem_desconto
+            and self.preco_desconto is not None
+            and self.preco is not None
+            and self.preco > 0
+        ):
             return int(((self.preco - self.preco_desconto) / self.preco) * 100)
         return 0
 
@@ -205,12 +240,14 @@ class Produto(models.Model):
         Dimensões/peso UNITÁRIOS para a cotação Melhor Envio (products[]).
         Não aplica mínimos de embalagem por peça — a API empacota a quantidade.
         """
-        height = max(int(self.altura_cm or 1), 1)
-        width = max(int(self.largura_cm or 1), 1)
-        length = max(int(self.comprimento_cm or 1), 1)
-        weight = float(self.peso_kg or 0)
-        if weight <= 0:
-            weight = 0.001
+        dimensions = (self.altura_cm, self.largura_cm, self.comprimento_cm)
+        if any(value is None or value <= 0 for value in dimensions):
+            raise ValueError('Informe altura, largura e comprimento maiores que zero.')
+        if self.peso_kg is None or self.peso_kg <= 0:
+            raise ValueError('Informe o peso do produto maior que zero.')
+
+        height, width, length = (int(value) for value in dimensions)
+        weight = float(self.peso_kg)
         return {
             'height': height,
             'width': width,

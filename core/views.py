@@ -1,6 +1,8 @@
 import json
+import secrets
 
-from django.http import HttpResponse, JsonResponse
+from django.conf import settings
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
@@ -13,6 +15,7 @@ from .services.melhor_envio import (
     exchange_code_for_token,
 )
 from .services.viacep import ViaCepError, consultar_cep
+from .services.frete_simulado import simular_opcoes_frete
 
 
 def home(request):
@@ -20,16 +23,19 @@ def home(request):
 
 
 def avaliacoes(request):
-    avaliacoes = Avaliacao.objects.all().order_by('-criado_em')
+    avaliacoes = Avaliacao.objects.select_related('produto').order_by('-criado_em')
     return render(request, 'core/avaliacoes.html', {'avaliacoes': avaliacoes})
 
 
 @ensure_csrf_cookie
 def produtos(request):
-    busca = request.GET.get('busca', '')
-    categoria_id = request.GET.get('categoria', '')
+    busca = request.GET.get('busca', '').strip()[:120]
+    categoria_raw = request.GET.get('categoria', '').strip()
+    categoria_id = categoria_raw if categoria_raw.isdecimal() else ''
 
-    produtos = Produto.objects.all().order_by('-criado_em')
+    produtos = Produto.objects.select_related('categoria').prefetch_related('imagens').order_by(
+        '-criado_em'
+    )
 
     if busca:
         produtos = produtos.filter(nome__icontains=busca)
@@ -99,49 +105,71 @@ def api_cotar_frete(request):
             status=400,
         )
 
-    # Valida CEP no ViaCEP antes de cotar
     try:
-        endereco = consultar_cep(cep_destino)
-    except ViaCepError as exc:
-        return JsonResponse(
-            {'ok': False, 'error': exc.message},
-            status=exc.status_code or 400,
-        )
+        dims = produto.dimensoes_unidade()
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
 
-    dims = produto.dimensoes_unidade()
-    insurance = float(produto.preco_seguro)
+    loja = ConfiguracaoLoja.get_solo()
+    simulado = settings.MELHOR_ENVIO_SIMULATE_FREIGHT
+    endereco = None
 
-    products = [{
-        'id': str(produto.codigo or produto.id),
-        'width': dims['width'],
-        'height': dims['height'],
-        'length': dims['length'],
-        'weight': dims['weight'],
-        'insurance_value': insurance,
-        'quantity': quantidade,
-    }]
+    if simulado:
+        try:
+            opcoes = simular_opcoes_frete(
+                cep_origem=loja.cep_digitos,
+                cep_destino=cep_destino,
+                dimensoes=dims,
+                quantidade=quantidade,
+            )
+        except ValueError as exc:
+            return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    else:
+        try:
+            endereco = consultar_cep(cep_destino)
+        except ViaCepError as exc:
+            return JsonResponse(
+                {'ok': False, 'error': exc.message},
+                status=exc.status_code or 400,
+            )
 
-    try:
-        opcoes = calcular_frete_produtos(
-            cep_destino=cep_destino,
-            products=products,
-        )
-    except MelhorEnvioError as exc:
-        status = exc.status_code if exc.status_code and 400 <= exc.status_code < 600 else 502
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': exc.message,
-                'details': exc.details,
-                'endereco': endereco,
-            },
-            status=status,
-        )
+        insurance = float(produto.preco_seguro)
+        products = [{
+            'id': str(produto.codigo or produto.id),
+            'width': dims['width'],
+            'height': dims['height'],
+            'length': dims['length'],
+            'weight': dims['weight'],
+            'insurance_value': insurance,
+            'quantity': quantidade,
+        }]
+
+        try:
+            opcoes = calcular_frete_produtos(
+                cep_destino=cep_destino,
+                products=products,
+            )
+        except MelhorEnvioError as exc:
+            status = exc.status_code if exc.status_code and 400 <= exc.status_code < 600 else 502
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': exc.message,
+                    'details': exc.details,
+                    'endereco': endereco,
+                },
+                status=status,
+            )
 
     return JsonResponse({
         'ok': True,
+        'simulado': simulado,
+        'aviso': (
+            'SIMULAÇÃO: preço e prazo ilustrativos; não são uma cotação do Melhor Envio.'
+            if simulado else ''
+        ),
         'endereco': endereco,
-        'origem_cep': ConfiguracaoLoja.get_solo().cep_digitos,
+        'origem_cep': loja.cep_digitos,
         'produto': {
             'id': produto.id,
             'nome': produto.nome,
@@ -157,13 +185,14 @@ def api_cotar_frete(request):
 @require_GET
 def melhorenvio_autorizar(request):
     """Redireciona para o OAuth do Melhor Envio (sandbox/produção)."""
+    state = secrets.token_urlsafe(32)
+    request.session['melhorenvio_oauth_state'] = state
     try:
-        url = build_authorize_url(state='patchworks')
+        url = build_authorize_url(state=state)
     except MelhorEnvioError as exc:
         return HttpResponse(
-            f'<h1>Configuração incompleta</h1><p>{exc.message}</p>'
-            '<p>Defina MELHOR_ENVIO_CLIENT_ID, MELHOR_ENVIO_CLIENT_SECRET e '
-            'MELHOR_ENVIO_REDIRECT_URI no arquivo .env.</p>',
+            '<h1>Configuração do Melhor Envio incompleta</h1>'
+            '<p>Confira as credenciais e o endereço de retorno configurados no ambiente local.</p>',
             status=exc.status_code or 503,
         )
     return redirect(url)
@@ -172,10 +201,20 @@ def melhorenvio_autorizar(request):
 @require_GET
 def melhorenvio_callback(request):
     """Recebe o ?code= do Melhor Envio e troca por access_token."""
+    expected_state = request.session.pop('melhorenvio_oauth_state', None)
+    received_state = request.GET.get('state')
+    if not expected_state or not received_state or not secrets.compare_digest(
+        expected_state, received_state
+    ):
+        return HttpResponseBadRequest(
+            '<h1>Retorno de autorização inválido</h1><p>Inicie a autorização novamente pelo site.</p>'
+        )
+
     error = request.GET.get('error')
     if error:
         return HttpResponseBadRequest(
-            f'<h1>Autorização negada</h1><p>{error}: {request.GET.get("error_description", "")}</p>'
+            '<h1>Autorização não concluída</h1>'
+            '<p>O Melhor Envio não autorizou a conexão. Tente novamente pelo site.</p>'
         )
 
     code = request.GET.get('code')
@@ -186,7 +225,8 @@ def melhorenvio_callback(request):
         data = exchange_code_for_token(code)
     except MelhorEnvioError as exc:
         return HttpResponse(
-            f'<h1>Falha ao obter token</h1><p>{exc.message}</p><pre>{exc.details}</pre>',
+            '<h1>Falha ao concluir a autorização</h1>'
+            '<p>Confira a configuração e tente novamente. Nenhuma credencial foi exibida.</p>',
             status=exc.status_code or 502,
         )
 
