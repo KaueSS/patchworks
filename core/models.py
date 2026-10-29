@@ -7,6 +7,24 @@ import re
 # limpa o numero removendo - ( ) espaços etc
 
 
+class MelhorEnvioToken(models.Model):
+    """Token OAuth do Melhor Envio persistido no banco, fora do Admin."""
+
+    payload = models.TextField('Dados OAuth')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Token do Melhor Envio'
+        verbose_name_plural = 'Token do Melhor Envio'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return 'Token do Melhor Envio'
+
+
 class ConfiguracaoLoja(models.Model):
     """Origem da loja (CEP/endereço) — editável no Admin (registro único)."""
 

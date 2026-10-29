@@ -1,4 +1,4 @@
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.template.loader import render_to_string
 import json
 import tempfile
@@ -7,10 +7,17 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from decimal import Decimal
 
+from django.contrib import admin
 from django.test import override_settings
 
+import core.models as core_models
 from core.models import Produto
-from core.services.melhor_envio import calcular_frete_produtos, get_access_token
+from core.services.melhor_envio import (
+    MelhorEnvioError,
+    calcular_frete_produtos,
+    get_access_token,
+    save_token_response,
+)
 from core.services.viacep import ViaCepError
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.signed_cookies')
@@ -183,6 +190,74 @@ class MelhorEnvioTokenRefreshTests(SimpleTestCase):
             request.call_args.kwargs['headers']['Authorization'],
             'Bearer fresh-access-token',
         )
+
+
+class MelhorEnvioTokenPersistenceTests(TestCase):
+    def test_oauth_token_has_a_database_model(self):
+        token_model = getattr(core_models, 'MelhorEnvioToken', None)
+
+        self.assertIsNotNone(token_model)
+        self.assertNotIn(token_model, admin.site._registry)
+
+    @override_settings(
+        MELHOR_ENVIO_TOKEN_STORAGE='database',
+        MELHOR_ENVIO_TOKEN='',
+    )
+    def test_oauth_response_is_persisted_in_database(self):
+        payload = {
+            'access_token': 'database-access-token',
+            'refresh_token': 'database-refresh-token',
+            'expires_in': 3600,
+            'token_type': 'Bearer',
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            token_file = Path(temporary_directory) / 'token.json'
+            with patch('core.services.melhor_envio.TOKEN_FILE', token_file):
+                save_token_response(payload)
+
+            token_model = core_models.MelhorEnvioToken
+            record = token_model.objects.filter(pk=1).first()
+            self.assertIsNotNone(record)
+            stored = json.loads(record.payload)
+            self.assertEqual(stored['access_token'], 'database-access-token')
+            self.assertEqual(stored['refresh_token'], 'database-refresh-token')
+            self.assertGreater(stored['expires_at'], 1)
+            self.assertFalse(token_file.exists())
+
+    @override_settings(
+        MELHOR_ENVIO_TOKEN_STORAGE='database',
+        MELHOR_ENVIO_TOKEN='',
+        MELHOR_ENVIO_CLIENT_ID='client-id-for-test',
+        MELHOR_ENVIO_CLIENT_SECRET='client-secret-for-test',
+        MELHOR_ENVIO_BASE_URL='https://sandbox.melhorenvio.com.br',
+    )
+    def test_database_token_is_refreshed_and_updated(self):
+        token_model = core_models.MelhorEnvioToken
+        token_model.objects.create(
+            pk=1,
+            payload=json.dumps({
+                'access_token': 'expired-database-token',
+                'refresh_token': 'database-refresh-token',
+                'expires_at': 1,
+            }),
+        )
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            'access_token': 'renewed-database-token',
+            'refresh_token': 'rotated-database-refresh-token',
+            'expires_in': 3600,
+        }
+
+        with patch('core.services.melhor_envio.requests.post', return_value=response):
+            try:
+                access_token = get_access_token()
+            except MelhorEnvioError:
+                access_token = None
+
+        self.assertEqual(access_token, 'renewed-database-token')
+        stored = json.loads(token_model.objects.get(pk=1).payload)
+        self.assertEqual(stored['refresh_token'], 'rotated-database-refresh-token')
 
 
 class FreightDemoModeTests(SimpleTestCase):

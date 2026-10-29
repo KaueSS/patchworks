@@ -29,9 +29,34 @@ def _user_agent() -> str:
     return settings.MELHOR_ENVIO_USER_AGENT
 
 
+def _load_database_token() -> dict | None:
+    from core.models import MelhorEnvioToken
+
+    record = MelhorEnvioToken.objects.filter(pk=1).first()
+    if record is None:
+        return None
+    try:
+        payload = json.loads(record.payload)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def get_access_token() -> str:
-    """Prioriza token salvo via OAuth; fallback para MELHOR_ENVIO_TOKEN no .env."""
-    if TOKEN_FILE.exists():
+    """Loads OAuth credentials from the configured durable or local storage."""
+    storage = getattr(settings, 'MELHOR_ENVIO_TOKEN_STORAGE', 'file').strip().lower()
+    data = _load_database_token() if storage == 'database' else None
+
+    if data and (data.get('access_token') or '').strip():
+        token = data['access_token'].strip()
+        expires_at = _expires_at(data)
+        if expires_at and expires_at <= time.time() + 120:
+            data = _refresh_access_token(data)
+            token = (data.get('access_token') or '').strip()
+        if token:
+            return token
+
+    if storage != 'database' and TOKEN_FILE.exists():
         try:
             data = json.loads(TOKEN_FILE.read_text(encoding='utf-8'))
             token = (data.get('access_token') or '').strip() if isinstance(data, dict) else ''
@@ -49,7 +74,7 @@ def get_access_token() -> str:
         return token
 
     raise MelhorEnvioError(
-        'Melhor Envio ainda não conectado. Configure o app no .env local e autorize pelo site.',
+        'Melhor Envio ainda não conectado. Configure o app e autorize pelo site.',
         status_code=503,
     )
 
@@ -59,6 +84,18 @@ def save_token_response(data: dict) -> None:
     expires_in = _positive_seconds(stored.get('expires_in'))
     if expires_in:
         stored['expires_at'] = int(time.time()) + expires_in
+
+    serialized = json.dumps(stored, ensure_ascii=False)
+    storage = getattr(settings, 'MELHOR_ENVIO_TOKEN_STORAGE', 'file').strip().lower()
+    if storage == 'database':
+        from core.models import MelhorEnvioToken
+
+        MelhorEnvioToken.objects.update_or_create(
+            pk=1,
+            defaults={'payload': serialized},
+        )
+        return
+
     TOKEN_FILE.write_text(json.dumps(stored, indent=2, ensure_ascii=False), encoding='utf-8')
 
 
